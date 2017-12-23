@@ -16,11 +16,11 @@ weechat.register(
 
 weechat.prnt("", "weecent\thi i'm weecent")
 
-# set default servers (will not be here in final version)
+# set default servers
 servers = {
-    "http://localhost:3000": {
-        "username": "xn--cr8h",
-        "password": "sensitive password"
+    "https://server-url-here.com": {
+        "username": "YOUR_USERNAME_HERE",
+        "password": "YOUR_PASSWORD_HERE"
     }
 }
 
@@ -46,7 +46,6 @@ for url, data in servers.items():
 
     # login
     login_r = requests.post(urljoin(url, "api/login"), json=data)
-    weechat.prnt("", str(login_r))
     login_data = login_r.json()
 
     server_name = url.split("//")[1]
