@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import weechat
 import requests
 import json
@@ -131,8 +133,8 @@ def timer_cb(data, remaining_calls):
             buffer_ = weechat.buffer_search("python",
                 xd[server]["channels"][j["data"]["message"]["channelID"]])
             # display the message!
-            weechat.prnt(buffer_, j["data"]["message"]["authorUsername"] +
-                            "\t" + j["data"]["message"]["text"])
+            weechat.prnt(buffer_, (j["data"]["message"]["authorUsername"] +
+                            "\t" + j["data"]["message"]["text"]).encode("utf-8"))
     return weechat.WEECHAT_RC_OK
 
 #weechat.hook_timer(60 * 1000, 60, 0, "timer_cb", "")
