@@ -63,27 +63,39 @@ for url, data in servers.items():
             channels = channels_r.json()['channels']
 
             # create server buffer
-            buffer = weechat.buffer_new(server_name, "server_input_cb",
+            buffer_ = weechat.buffer_new(server_name, "server_input_cb",
                 "", "server_close_cb", "")
-            weechat.buffer_set(buffer, "title", "Weecent testing!")
-            weechat.buffer_set(buffer, "localvar_set_no_log", "1")
-            weechat.buffer_set(buffer, "localvar_set_type", "server")
-            weechat.buffer_set(buffer, "localvar_set_url", url)
-            weechat.buffer_set(buffer, "localvar_set_server", server_name)
+            weechat.buffer_set(buffer_, "title", "Weecent testing!")
+            weechat.buffer_set(buffer_, "localvar_set_no_log", "1")
+            weechat.buffer_set(buffer_, "localvar_set_type", "server")
+            weechat.buffer_set(buffer_, "localvar_set_url", url)
+            weechat.buffer_set(buffer_, "localvar_set_server", server_name)
 
             # create channel buffers
             xd[url]["channels"] = {}
             for channel in channels:
-                buffer = weechat.buffer_new(channel["name"], "send_message",
+                # set up buffer
+                buffer_ = weechat.buffer_new(channel["name"], "send_message",
                     "", "channel_close_cb", "")
-                weechat.buffer_set(buffer, "title", "Weecent testing!")
-                weechat.buffer_set(buffer, "localvar_set_no_log", "1")
-                weechat.buffer_set(buffer, "localvar_set_type", "channel")
-                weechat.buffer_set(buffer, "localvar_set_channel",
+                weechat.buffer_set(buffer_, "title", "Weecent testing!")
+                weechat.buffer_set(buffer_, "localvar_set_no_log", "1")
+                weechat.buffer_set(buffer_, "localvar_set_type", "channel")
+                weechat.buffer_set(buffer_, "localvar_set_channel",
                     json.dumps(channel))
-                weechat.buffer_set(buffer, "localvar_set_url", url)
-                weechat.buffer_set(buffer, "localvar_set_server", server_name)
+                weechat.buffer_set(buffer_, "localvar_set_url", url)
+                weechat.buffer_set(buffer_, "localvar_set_server", server_name)
                 xd[url]["channels"][channel["id"]] = channel["name"]
+
+                # get scrollback
+                scrollback_r = requests.get(
+                    urljoin(url, "api/channel/%s/latest-messages" % channel["id"]))
+                messages = scrollback_r.json()["messages"]
+                for m in messages:
+                    weechat.prnt_date_tags(
+                        buffer_,
+                        m["date"] / 1000,
+                        "notify_none",
+                        (m["authorUsername"] + "\t" + m["text"]).encode("utf-8"))
         else:
             weechat.prnt("", "ono a bad happened")
 
@@ -138,8 +150,11 @@ def timer_cb(data, remaining_calls):
             buffer_ = weechat.buffer_search("python",
                 xd[server]["channels"][j["data"]["message"]["channelID"]])
             # display the message!
-            weechat.prnt(buffer_, (j["data"]["message"]["authorUsername"] +
-                            "\t" + j["data"]["message"]["text"]).encode("utf-8"))
+            weechat.prnt_date_tags(
+                buffer_,
+                m["date"] / 1000,
+                "notify_message",
+                (m["authorUsername"] + "\t" + m["text"]).encode("utf-8"))
     return weechat.WEECHAT_RC_OK
 
 #weechat.hook_timer(60 * 1000, 60, 0, "timer_cb", "")
