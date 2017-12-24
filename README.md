@@ -17,4 +17,4 @@ cp weecent.py ~/.weecent/python/autoload/
 Then, in WeeChat:
 
 ```
-/ser plugins.var.python.weecent.servers {"https://YOUR_DECENT_SERVER_HERE.com": {"username": "YOUR_USERNAME_HERE", "password": "YOUR_PASSWORD_HERE"}}
+/set plugins.var.python.weecent.servers {"https://YOUR_DECENT_SERVER_HERE.com": {"username": "YOUR_USERNAME_HERE", "password": "YOUR_PASSWORD_HERE"}}
