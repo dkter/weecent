@@ -38,8 +38,14 @@ xd = dict(servers)     # i couldn't figure out what to call this,
 
 for url, data in servers.items():
     # ping the server, to see if it's online
-    ping = requests.get(url)
-    if ping.status_code != requests.codes.ok:
+    ping = requests.get(urljoin(url, "api"))
+    if ping.status_code == requests.codes.teapot and "decent" in ping.json():
+        weechat.prnt("", "weecent\tSuccessfully connected to Decent server %s." % url)
+    elif ping.status_code in (requests.codes.ok, requests.codes.not_found):
+        weechat.prnt("", "weecent\t%s is not a valid Decent server, skipping." % url)
+        del xd[url]
+        continue
+    else:
         weechat.prnt("", "weecent\tCould not connect to %s, skipping." % url)
         del xd[url]
         continue
