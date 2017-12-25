@@ -4,6 +4,7 @@ import weechat
 import requests
 import json
 import re
+import ssl
 import websocket
 from urlparse import urlparse, urljoin
 
@@ -36,6 +37,12 @@ servers = json.loads(weechat.config_string(
     weechat.config_get("plugins.var.python.weecent.servers")))
 xd = dict(servers)     # i couldn't figure out what to call this,
                        # and eq told me to call it `xd`
+
+sslopt_ca_certs = {}
+if hasattr(ssl, "get_default_verify_paths") and callable(ssl.get_default_verify_paths):
+    ssl_defaults = ssl.get_default_verify_paths()
+    if ssl_defaults.cafile is not None:
+        sslopt_ca_certs = {'ca_certs': ssl_defaults.cafile}
 
 
 # functions ##################################################################
@@ -165,15 +172,16 @@ for url, data in servers.items():
 
         # create websocket
         if not "socket" in xd[url]:
+            # wss or ws?
             use_secure = requests.get(
                 urljoin(url, "api/should-use-secure")).json()
-            if use_secure["useSecure"]:
-                xd[url]['socket'] = websocket.create_connection(
-                    "wss://" + server_name)
-            else:
-                xd[url]['socket'] = websocket.create_connection(
-                    "ws://" + server_name)
+            protocol = "wss://" if use_secure["useSecure"] else "ws://"
+
+            xd[url]['socket'] = websocket.create_connection(
+                protocol + server_name, sslopt = sslopt_ca_certs)
+
             weechat.hook_fd(xd[url]['socket'].sock._sock.fileno(), 1, 0, 0,
                             "timer_cb", "")
+            xd[url]['socket'].sock.setblocking(0)
     else:
         weechat.prnt("", "ono a bad happened")
