@@ -48,6 +48,102 @@ if hasattr(ssl, "get_default_verify_paths") and callable(ssl.get_default_verify_
 # functions ##################################################################
 
 
+def connect(url, data):
+    # ping the server, to see if it's online
+    ping = requests.get(urljoin(url, "api"))
+    if ping.status_code == requests.codes.teapot and "decent" in ping.json():
+        weechat.prnt(
+            "", "weecent\tSuccessfully connected to Decent server %s." % url)
+    elif ping.status_code in (requests.codes.ok, requests.codes.not_found):
+        weechat.prnt(
+            "", "weecent\t%s is not a valid Decent server, skipping." % url)
+        del xd[url]
+        return
+    else:
+        weechat.prnt("", "weecent\tCould not connect to %s, skipping." % url)
+        del xd[url]
+        return
+
+    # login
+    login_r = requests.post(urljoin(url, "api/login"), json=data)
+    login_data = login_r.json()
+
+    server_name = url.split("//")[1]
+    if login_data["success"]:
+        session_id = login_data["sessionID"]
+        xd[url]["session_id"] = session_id
+
+        channels_r = requests.get(urljoin(url, "api/channel-list"),
+                                  {'sessionID': session_id})
+        if channels_r.json()['success']:
+            channels = channels_r.json()['channels']
+
+            # create server buffer
+            buffer_ = weechat.buffer_new(server_name, "server_input_cb",
+                                         "", "server_close_cb", "")
+            weechat.buffer_set(buffer_, "title", "Weecent testing!")
+            weechat.buffer_set(buffer_, "localvar_set_no_log", "1")
+            weechat.buffer_set(buffer_, "localvar_set_type", "server")
+            weechat.buffer_set(buffer_, "localvar_set_url", url)
+            weechat.buffer_set(buffer_, "localvar_set_server", server_name)
+
+            # create channel buffers
+            xd[url]["channels"] = {}
+            for channel in channels:
+                xd[url]["channels"][channel["id"]]= {"name": channel["name"]}
+
+                # set up buffer
+                buffer_ = weechat.buffer_new(channel["name"], "send_message",
+                                             "", "channel_close_cb", "")
+                weechat.buffer_set(buffer_, "title", "Weecent testing!")
+                weechat.buffer_set(buffer_, "nicklist", "1")
+                weechat.buffer_set(buffer_, "nicklist_display_groups", "0")
+                weechat.buffer_set(buffer_, "localvar_set_no_log", "1")
+                weechat.buffer_set(buffer_, "localvar_set_type", "channel")
+                weechat.buffer_set(buffer_, "localvar_set_channel",
+                                   json.dumps(channel))
+                weechat.buffer_set(buffer_, "localvar_set_url", url)
+                weechat.buffer_set(buffer_, "localvar_set_server", server_name)
+                xd[url]["channels"][channel["id"]]["buffer"] = buffer_
+
+                # get scrollback
+                scrollback_r = requests.get(
+                    urljoin(url, "api/channel/%s/latest-messages" % channel["id"]))
+                messages = scrollback_r.json()["messages"]
+                for m in messages:
+                    display_msg(buffer_, m, xd[url])
+
+                # get users
+                users_r = requests.get(urljoin(url, "api/user-list"))
+                users = users_r.json()["users"]
+
+                group = weechat.nicklist_add_group(buffer_, "", "Users",
+                    "weechat.color.nicklist_group", 1)
+
+                for u in users:
+                    weechat.nicklist_add_nick(buffer_, group, u["username"],
+                        "default" if u["online"] else "lightgrey",
+                        "", "lightgreen", 1)
+        else:
+            weechat.prnt("", "ono a bad happened")
+
+        # create websocket
+        if not "socket" in xd[url]:
+            # wss or ws?
+            use_secure = requests.get(
+                urljoin(url, "api/should-use-secure")).json()
+            protocol = "wss://" if use_secure["useSecure"] else "ws://"
+
+            xd[url]['socket'] = websocket.create_connection(
+                protocol + server_name, sslopt = sslopt_ca_certs)
+
+            weechat.hook_fd(xd[url]['socket'].sock._sock.fileno(), 1, 0, 0,
+                            "recv_cb", "")
+            xd[url]['socket'].sock.setblocking(0)
+    else:
+        weechat.prnt("", "ono a bad happened")
+
+
 def display_msg(buffer_, message, server, tag = "notify_none"):
     ping_re = r"\b" + server["username"] + r"\b"
 
@@ -69,7 +165,7 @@ def send_message(data, buffer, input_data):
     message_data = {
         "text": input_data,
         "channelID": channel['id'],
-        "sessionID": session_id
+        "sessionID": xd[url]["session_id"]
     }
     r = requests.post(urljoin(url, "api/send-message"), json=message_data)
     return weechat.WEECHAT_RC_OK
@@ -90,98 +186,63 @@ def server_close_cb(data, buffer):
     return weechat.WEECHAT_RC_OK
 
 
-# timer for receiving messages
-def timer_cb(data, remaining_calls):
+# callback for receiving messages
+def recv_cb(data, remaining_calls):
     for server in xd:
-        message_data = xd[server]['socket'].recv()
-        j = json.loads(message_data)
-        if j['evt'] == "received chat message":
-            # get buffer that corresponds to the channel ID
-            buffer_ = weechat.buffer_search(
-                "python",
-                xd[server]["channels"][j["data"]["message"]["channelID"]])
-            # display the message!
-            display_msg(buffer_, j["data"]["message"], xd[server],
-                        "notify_message")
+        try:
+            message_data = xd[server]["socket"].recv()
+            j = json.loads(message_data)
+
+            if j["evt"] == "received chat message":
+                # get buffer that corresponds to the channel ID
+                buffer_ = weechat.buffer_search(
+                    "python",
+                    xd[server]["channels"][j["data"]["message"]["channelID"]]["name"])
+
+                # display the message!
+                display_msg(buffer_, j["data"]["message"], xd[server],
+                            "notify_message")
+
+            elif j["evt"] == "ping for data":
+                pong_data = json.dumps({"evt": "pong data", "data": {
+                    "sessionID": xd[server]["session_id"]}})
+                xd[server]["socket"].send(pong_data)
+        except websocket.WebSocketConnectionClosedException:
+            weechat.prnt("", "weecent\tLost connection to server %s. Reconnecting..."
+                             % server)
+            connect(server, servers[server])
+        except ssl.SSLWantReadError:
+            # not sure what to do here.
+            # it doesn't seem to affect execution much so I'll just ignore it
+            # todo: figure out what this means
+            weechat.prnt("", "weecent\ti got that darn ssl error again")
+
     return weechat.WEECHAT_RC_OK
+
+
+# timer for updating the online/offline list
+def nicklist_timer(data, remaining_calls):
+    for server in xd:
+        users_r = requests.get(urljoin(server, "api/user-list"))
+        users = users_r.json()["users"]
+        for channel in xd[server]["channels"].itervalues():
+            weechat.nicklist_remove_all(channel["buffer"])
+            group = weechat.nicklist_add_group(channel["buffer"], "", "Users",
+                    "weechat.color.nicklist_group", 1)
+            for u in users:
+                weechat.nicklist_add_nick(
+                    channel["buffer"],
+                    group,
+                    u["username"],
+                    "default" if u["online"] else "lightgrey",
+                    "", "lightgreen", 1)
+    return weechat.WEECHAT_RC_OK
+
+weechat.hook_timer(60 * 1000, 60, 0, "nicklist_timer", "")
 
 
 # populate buffers, open sockets, set everything up ##########################
 
 
 for url, data in servers.items():
-    # ping the server, to see if it's online
-    ping = requests.get(urljoin(url, "api"))
-    if ping.status_code == requests.codes.teapot and "decent" in ping.json():
-        weechat.prnt(
-            "", "weecent\tSuccessfully connected to Decent server %s." % url)
-    elif ping.status_code in (requests.codes.ok, requests.codes.not_found):
-        weechat.prnt(
-            "", "weecent\t%s is not a valid Decent server, skipping." % url)
-        del xd[url]
-        continue
-    else:
-        weechat.prnt("", "weecent\tCould not connect to %s, skipping." % url)
-        del xd[url]
-        continue
-
-    # login
-    login_r = requests.post(urljoin(url, "api/login"), json=data)
-    login_data = login_r.json()
-
-    server_name = url.split("//")[1]
-    if login_data["success"]:
-        session_id = login_data["sessionID"]
-        channels_r = requests.get(urljoin(url, "api/channel-list"),
-                                  {'sessionID': session_id})
-        if channels_r.json()['success']:
-            channels = channels_r.json()['channels']
-
-            # create server buffer
-            buffer_ = weechat.buffer_new(server_name, "server_input_cb",
-                                         "", "server_close_cb", "")
-            weechat.buffer_set(buffer_, "title", "Weecent testing!")
-            weechat.buffer_set(buffer_, "localvar_set_no_log", "1")
-            weechat.buffer_set(buffer_, "localvar_set_type", "server")
-            weechat.buffer_set(buffer_, "localvar_set_url", url)
-            weechat.buffer_set(buffer_, "localvar_set_server", server_name)
-
-            # create channel buffers
-            xd[url]["channels"] = {}
-            for channel in channels:
-                # set up buffer
-                buffer_ = weechat.buffer_new(channel["name"], "send_message",
-                                             "", "channel_close_cb", "")
-                weechat.buffer_set(buffer_, "title", "Weecent testing!")
-                weechat.buffer_set(buffer_, "localvar_set_no_log", "1")
-                weechat.buffer_set(buffer_, "localvar_set_type", "channel")
-                weechat.buffer_set(buffer_, "localvar_set_channel",
-                                   json.dumps(channel))
-                weechat.buffer_set(buffer_, "localvar_set_url", url)
-                weechat.buffer_set(buffer_, "localvar_set_server", server_name)
-                xd[url]["channels"][channel["id"]] = channel["name"]
-
-                # get scrollback
-                scrollback_r = requests.get(
-                    urljoin(url, "api/channel/%s/latest-messages" % channel["id"]))
-                messages = scrollback_r.json()["messages"]
-                for m in messages:
-                    display_msg(buffer_, m, xd[url])
-        else:
-            weechat.prnt("", "ono a bad happened")
-
-        # create websocket
-        if not "socket" in xd[url]:
-            # wss or ws?
-            use_secure = requests.get(
-                urljoin(url, "api/should-use-secure")).json()
-            protocol = "wss://" if use_secure["useSecure"] else "ws://"
-
-            xd[url]['socket'] = websocket.create_connection(
-                protocol + server_name, sslopt = sslopt_ca_certs)
-
-            weechat.hook_fd(xd[url]['socket'].sock._sock.fileno(), 1, 0, 0,
-                            "timer_cb", "")
-            xd[url]['socket'].sock.setblocking(0)
-    else:
-        weechat.prnt("", "ono a bad happened")
+    connect(url, data)
