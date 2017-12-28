@@ -7,6 +7,7 @@ import re
 import ssl
 import websocket
 from urlparse import urlparse, urljoin
+from copy import deepcopy
 
 weechat.register(
     "weecent",
@@ -35,8 +36,8 @@ for option, default_value in script_options.items():
 
 servers = json.loads(weechat.config_string(
     weechat.config_get("plugins.var.python.weecent.servers")))
-xd = dict(servers)     # i couldn't figure out what to call this,
-                       # and eq told me to call it `xd`
+xd = deepcopy(servers)     # i couldn't figure out what to call this,
+                           # and eq told me to call it `xd`
 
 sslopt_ca_certs = {}
 if hasattr(ssl, "get_default_verify_paths") and callable(ssl.get_default_verify_paths):
@@ -87,11 +88,12 @@ def connect(url, data):
             weechat.buffer_set(buffer_, "localvar_set_type", "server")
             weechat.buffer_set(buffer_, "localvar_set_url", url)
             weechat.buffer_set(buffer_, "localvar_set_server", server_name)
+            xd[url]["buffer"] = buffer_
 
             # create channel buffers
             xd[url]["channels"] = {}
             for channel in channels:
-                xd[url]["channels"][channel["id"]]= {"name": channel["name"]}
+                xd[url]["channels"][channel["id"]] = {"name": channel["name"]}
 
                 # set up buffer
                 buffer_ = weechat.buffer_new(channel["name"], "send_message",
@@ -211,6 +213,16 @@ def recv_cb(data, remaining_calls):
         except websocket.WebSocketConnectionClosedException:
             weechat.prnt("", "weecent\tLost connection to server %s. Reconnecting..."
                              % server)
+
+            # close socket
+            xd[server]["socket"].close()
+            del xd[server]["socket"]
+
+            # delete everything because I'm lazy
+            weechat.buffer_close(xd[server]["buffer"])
+            for channel in xd[server]["channels"].itervalues():
+                weechat.buffer_close(channel["buffer"])
+
             connect(server, servers[server])
         except ssl.SSLWantReadError:
             # not sure what to do here.
