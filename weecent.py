@@ -49,6 +49,7 @@ if hasattr(ssl, "get_default_verify_paths") and callable(ssl.get_default_verify_
 
 
 def connect(url, data):
+    global xd
     # ping the server, to see if it's online
     ping = requests.get(urljoin(url, "api"))
     if ping.status_code == requests.codes.teapot and "decent" in ping.json():
@@ -238,7 +239,7 @@ def nicklist_timer(data, remaining_calls):
                     "", "lightgreen", 1)
     return weechat.WEECHAT_RC_OK
 
-weechat.hook_timer(60 * 1000, 60, 0, "nicklist_timer", "")
+weechat.hook_timer(30 * 1000, 30, 0, "nicklist_timer", "")
 
 
 # populate buffers, open sockets, set everything up ##########################
