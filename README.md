@@ -16,7 +16,7 @@ This project is in alpha stage and is not stable. If something breaks, let me kn
 ```
 git clone https://github.com/TheInitializer/weecent.git
 cd weecent
-cp weecent.py ~/.weecent/python/autoload/
+cp weecent.py ~/.weechat/python/autoload/
 ```
 
 Then, in WeeChat:
