@@ -196,7 +196,7 @@ def recv_cb(data, remaining_calls):
             message_data = xd[server]["socket"].recv()
             j = json.loads(message_data)
 
-            if j["evt"] == "received chat message":
+            if j["evt"] == "message/new":
                 # get buffer that corresponds to the channel ID
                 buffer_ = weechat.buffer_search(
                     "python",
@@ -206,8 +206,8 @@ def recv_cb(data, remaining_calls):
                 display_msg(buffer_, j["data"]["message"], xd[server],
                             "notify_message")
 
-            elif j["evt"] == "ping for data":
-                pong_data = json.dumps({"evt": "pong data", "data": {
+            elif j["evt"] == "pingdata":
+                pong_data = json.dumps({"evt": "pongdata", "data": {
                     "sessionID": xd[server]["session_id"]}})
                 xd[server]["socket"].send(pong_data)
         except websocket.WebSocketConnectionClosedException:
